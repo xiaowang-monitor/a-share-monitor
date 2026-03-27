@@ -1,0 +1,21 @@
+{
+  "buy_threshold": 70,
+  "stop_loss_pct": 0.06,
+  "take_profit_pct": 0.15,
+  "w_sentiment": 25,
+  "w_sector": 20,
+  "w_leader": 20,
+  "w_fund": 15,
+  "w_vp": 10,
+  "w_seal": 10,
+  "price_max_live": 60,
+  "mc_min_live": 50,
+  "turn_min_live": 5,
+  "price_max_bt": 200,
+  "mc_min_bt": 0,
+  "turn_min_bt": 3,
+  "max_hold": 3,
+  "hold_days_max": 5,
+  "slippage": 0.002,
+  "commission": 0.0003
+}
