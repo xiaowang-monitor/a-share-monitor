@@ -1,0 +1,27 @@
+name: 全球资讯早报
+
+on:
+  schedule:
+    # 每天北京时间 7:57 (UTC 23:57 前一天)
+    - cron: '57 23 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  daily-news:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Collect and push global news
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+        run: python global_news.py
