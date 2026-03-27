@@ -379,6 +379,51 @@ def _auto_categorize(text):
     return "综合资讯"
 
 
+# ──────────────────── 英文标题翻译 ────────────────────
+
+def _is_english(text):
+    """判断文本是否主要为英文"""
+    if not text:
+        return False
+    ascii_chars = sum(1 for c in text if ord(c) < 128)
+    return ascii_chars / max(len(text), 1) > 0.7
+
+
+def _translate_google(text, src='en', tgt='zh-CN'):
+    """通过 Google Translate 免费接口翻译"""
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx", "sl": src, "tl": tgt,
+            "dt": "t", "q": text,
+        }
+        r = requests.get(url, params=params, timeout=8,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            data = r.json()
+            # 返回格式: [[["翻译结果","原文",null,null,10]],null,"en"]
+            if data and data[0]:
+                return "".join(seg[0] for seg in data[0] if seg[0])
+    except Exception as e:
+        print(f"    翻译失败: {e}")
+    return ""
+
+
+def translate_items(items):
+    """为英文标题添加中文翻译"""
+    count = 0
+    for item in items:
+        title = item.get("title", "")
+        if _is_english(title) and not item.get("title_cn"):
+            cn = _translate_google(title)
+            if cn and cn != title:
+                item["title_cn"] = cn
+                count += 1
+            time.sleep(0.2)  # 避免请求过快
+    print(f"  翻译英文标题: {count} 条")
+    return items
+
+
 # ──────────────────── 重要性评分 & 去重 ────────────────────
 
 def score_importance(item):
@@ -475,6 +520,13 @@ def build_digest(max_per_cat=8, total_max=40):
             total_count += len(digest[cat])
             print(f"  [{cat}] {len(by_cat[cat])}条 → 精选 {len(digest[cat])}条")
 
+    # 翻译英文标题
+    print("  === 翻译英文标题 ===")
+    all_selected = []
+    for items in digest.values():
+        all_selected.extend(items)
+    translate_items(all_selected)
+
     print(f"  最终摘要: {total_count} 条")
     return digest
 
@@ -512,6 +564,7 @@ def push_digest_feishu(digest, webhook=None):
 
         for i, item in enumerate(items):
             title = item["title"][:60]
+            title_cn = item.get("title_cn", "")
             source = item.get("source", "")
             link = item.get("link", "")
             summary = item.get("summary", "")
@@ -524,12 +577,17 @@ def push_digest_feishu(digest, webhook=None):
             else:
                 tag = "⚪"
 
+            # 显示标题（英文附带中文翻译）
             if link:
                 line = f"{tag} **{i+1}. [{title}]({link})**"
             else:
                 line = f"{tag} **{i+1}. {title}**"
 
-            if summary and summary != title:
+            # 英文标题下面附上中文翻译
+            if title_cn:
+                line += f"\n　　📝 {title_cn}"
+
+            if summary and summary != title and not title_cn:
                 short = summary[:80]
                 if len(summary) > 80:
                     short += "..."
