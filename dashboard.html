@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股利好监控面板</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #0a0e17;
+  --bg-card: #111827;
+  --bg-card-hover: #1a2332;
+  --border: #1e293b;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.1);
+  --green: #22c55e;
+  --green-bg: rgba(34,197,94,0.1);
+  --gold: #f59e0b;
+  --blue: #3b82f6;
+  --purple: #8b5cf6;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: 'Noto Sans SC', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+}
+.mono { font-family: 'JetBrains Mono', monospace; }
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: all 0.2s;
+}
+.card:hover { background: var(--bg-card-hover); border-color: #334155; }
+.badge {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 6px; font-size: 12px; font-weight: 500;
+}
+.badge-s { background: rgba(239,68,68,0.2); color: #ef4444; }
+.badge-a { background: rgba(245,158,11,0.2); color: #f59e0b; }
+.badge-b { background: rgba(59,130,246,0.2); color: #3b82f6; }
+.badge-c { background: rgba(100,116,139,0.2); color: #94a3b8; }
+.score-bar {
+  height: 6px; border-radius: 3px; background: #1e293b; overflow: hidden;
+}
+.score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+.up { color: var(--red); }
+.down { color: var(--green); }
+.pulse { animation: pulse 2s infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.glow { box-shadow: 0 0 20px rgba(59,130,246,0.15); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+</style>
+<script>
+tailwind.config = {
+  theme: { extend: { colors: {
+    'brand': { 50:'#eff6ff', 500:'#3b82f6', 900:'#1e3a5f' }
+  }}}
+}
+</script>
+</head>
+<body class="p-4 md:p-6 lg:p-8">
+
+<!-- 顶部状态栏 -->
+<div class="flex flex-wrap items-center justify-between mb-6 gap-4">
+  <div class="flex items-center gap-3">
+    <div class="w-10 h-10 bg-gradient-to-br from-red-500 to-orange-500 rounded-lg flex items-center justify-center font-bold text-white text-lg">A</div>
+    <div>
+      <h1 class="text-xl font-bold">A股利好监控面板</h1>
+      <p class="text-xs text-gray-500">实盘监控 + 短线量化交易系统</p>
+    </div>
+  </div>
+  <div class="flex items-center gap-4 text-sm">
+    <span id="market-status" class="badge"></span>
+    <span id="update-time" class="mono text-gray-500"></span>
+    <span id="countdown" class="mono text-gray-600"></span>
+  </div>
+</div>
+
+<!-- 核心指标卡片 -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" id="kpi-cards"></div>
+
+<!-- 主内容区 -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+  <!-- 左列: Hot7 + 板块 -->
+  <div class="space-y-6">
+    <div class="card">
+      <h2 class="text-sm font-medium text-gray-400 mb-4">HOT7 热门排行</h2>
+      <div id="hot7-list" class="space-y-3"></div>
+    </div>
+    <div class="card">
+      <h2 class="text-sm font-medium text-gray-400 mb-4">板块热度</h2>
+      <div id="sector-chart" style="height:260px"></div>
+    </div>
+  </div>
+
+  <!-- 中列: 精选个股 -->
+  <div class="lg:col-span-2">
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-medium text-gray-400">精选个股 (一致性评分)</h2>
+        <span class="text-xs text-gray-600 mono">满分100 = 情绪25+板块20+龙头20+资金15+量价10+封单10</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-gray-500 text-xs border-b border-gray-800">
+              <th class="text-left py-2 px-2">代码</th>
+              <th class="text-left py-2 px-1">名称</th>
+              <th class="text-right py-2 px-1">现价</th>
+              <th class="text-right py-2 px-1">涨幅</th>
+              <th class="text-right py-2 px-1">评分</th>
+              <th class="py-2 px-1 text-center" style="min-width:160px">评分分布</th>
+              <th class="text-right py-2 px-1">板块</th>
+              <th class="text-right py-2 px-1">连涨</th>
+            </tr>
+          </thead>
+          <tbody id="picks-table"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新闻流 + 交易代理 -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="card">
+    <h2 class="text-sm font-medium text-gray-400 mb-4">实时新闻流</h2>
+    <div id="news-feed" class="space-y-2 max-h-96 overflow-y-auto pr-2"></div>
+  </div>
+  <div class="card">
+    <h2 class="text-sm font-medium text-gray-400 mb-4">交易代理状态</h2>
+    <div id="agent-status" class="space-y-3"></div>
+  </div>
+</div>
+
+<!-- 数据注入 -->
+<script>
+const HOT7     = [{"symbol": "sh601318", "name": "金融概念", "mentions": 47, "news": ["板块热度: 金融"]}, {"symbol": "sh600036", "name": "金融概念", "mentions": 47, "news": ["板块热度: 金融"]}, {"symbol": "sh600893", "name": "军工概念", "mentions": 30, "news": ["板块热度: 军工"]}, {"symbol": "sh601698", "name": "军工概念", "mentions": 30, "news": ["板块热度: 军工"]}, {"symbol": "sz002230", "name": "人工智能概念", "mentions": 16, "news": ["板块热度: 人工智能"]}, {"symbol": "sz300496", "name": "人工智能概念", "mentions": 16, "news": ["板块热度: 人工智能"]}];
+const PICKS    = [];
+const NEWS     = [{"id": "4152619", "title": "商业航天板块震荡回升 神剑股份涨停", "content": "商业航天板块震荡回升，腾景科技盘中创新高，神剑股份涨停，先锋精科、深圳新星、银河电子、远东股份、和而泰跟涨。", "ctime": 1774577879, "time_str": "10:17:59", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585585.shtml"}, {"id": "4152605", "title": "中证1000股指期货(IM)主力合约日内涨超1%", "content": "中证1000股指期货(IM)主力合约日内涨超1%，现报7462.8点。", "ctime": 1774577769, "time_str": "10:16:09", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585549.shtml"}, {"id": "4152597", "title": "沪深京三市成交额超7000亿元，较上日此时缩量940亿元", "content": "据同花顺iFinD数据，沪深京三市成交额超7000亿元，较上日此时缩量940亿元，预计全天成交金额约1.7万亿元。截至目前，沪市成交额3007亿元，深市成交额3951亿元，北证50成交额41亿元。", "ctime": 1774577608, "time_str": "10:13:28", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585504.shtml"}, {"id": "4152589", "title": "沪指低开高走率先翻红", "content": "沪指低开高走率先翻红，深成指、创业板指跌幅收窄。创新药、化工、军工板块涨幅居前。", "ctime": 1774577363, "time_str": "10:09:23", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585435.shtml"}, {"id": "4152573", "title": "中远海运集运旗下两艘集装箱船正靠近霍尔木兹海峡", "content": "记者今日获悉，根据中远海科船视宝船舶AIS数据，中远海运集运的两艘在波斯湾内的集装箱船“中海北冰洋”、“中海印度洋”，今日船舶状态已从“锚泊”变为“航行”，截至AIS更新时间3月27日9时45分左右，两艘船的船舶位置已接近霍尔木兹海峡。(财联社)", "ctime": 1774577001, "time_str": "10:03:21", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585337.shtml"}, {"id": "4152565", "title": "现货黄金站上4430美元/盎司 纽约期金站上4450美元/盎司", "content": "现货黄金站上4430美元/盎司，日内涨1.1%。纽约期金站上4450美元/盎司，日内涨1.0%。", "ctime": 1774576932, "time_str": "10:02:12", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585279.shtml"}, {"id": "4152557", "title": "特朗普将签署行政令向机场安检人员发薪", "content": "美国总统特朗普26日表示，他将签署一项行政令，指示国土安全部长立即向运输安全管理局的机场安检人员支付工资。特朗普当天在社交媒体上发文，指责民主党人应为当前机场的混乱局面负责。他表示将签署一项行政令，指示国土安全部长马克韦恩·马林立即向该部门下属运输安全管理局的机场安检人员发放薪资，以应对当前的紧急态势。与此同时，参议院民主党人和共和党人就国土安全部拨款问题进行的谈判仍陷于僵局。参议院多数党领袖、共和党人约翰·图恩当天稍早时表示，共和党人已就国土安全部拨款问题向民主党人提出了“最终”方案。由于国土安全部“停摆”持续，负责机场安检的员工已数周领不到工资，请假甚至辞职的人数激增，人手短缺造成机场混乱局面日益严重，全美各地机场出现了严重的安检排队时间长和航班延误。这一状况甚至可能导致部分机场关闭。特朗普23日派遣移民与海关执法局人员参与机场安保工作，他随后又于25日表示，可能调遣国民警卫队提供“更多帮助”。(新华社)", "ctime": 1774576854, "time_str": "10:00:54", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585256.shtml"}, {"id": "4152549", "title": "开盘半小时 沪深京三市成交额达5786亿元", "content": "据同花顺iFinD数据，开盘半小时，沪深京三市成交额达5786亿元，较上日此时缩量700亿元，预计全天成交金额约1.8万亿。", "ctime": 1774576811, "time_str": "10:00:11", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585223.shtml"}, {"id": "4152539", "title": "日本防卫大臣：将依法严肃处理自卫队人员强闯中国驻日使馆一事", "content": "当地时间3月27日，日本防卫大臣小泉进次郎就日本自卫队人员强行闯入中国驻日本大使馆一事表示，应当遵守法律和纪律的自卫队人员被逮捕，令人深感遗憾。他强调，待相关事实关系查明后，将依法严肃处理。3月24日上午，一名日本自卫队人员翻墙强行闯入中国驻日使馆，威胁杀害中国外交人员。中国驻日使馆提出严正交涉并表示强烈抗议，要求日方作出负责任的交代。事件发生后，日本警方称“对此事深表遗憾”，并将对中国驻日使馆实施24小时警戒。日本陆上自卫队表示，将全面配合警方调查，并在查明事实基础上作出严肃处理。（央视新闻）", "ctime": 1774576643, "time_str": "09:57:23", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585120.shtml"}, {"id": "4152531", "title": "机构：2026年3季度存储产品涨幅将放缓", "content": "3月27日，据记者从CFMS|MemoryS 2026闪存行业峰会获悉，存储产品的价格已经历了连续三个季度大涨，预计2026年3季度开始涨幅会放缓，逐渐收敛，一些具体产品线上价格会有一些分化。对于客户，锁定存储产能比锁定价格更重要。相比起火热的AI市场，以手机为代表的消费类市场就进入阵痛期，成本迅速上升，预计销售量将下降约10%，部分手机降幅最高将达30%。（证券时报）", "ctime": 1774576348, "time_str": "09:52:28", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585021.shtml"}, {"id": "4152529", "title": "沪深京三市成交额超5000亿元，较上日此时缩量575亿元", "content": "据同花顺iFinD数据，沪深京三市成交额超5000亿元，较上日此时缩量575亿元，预计全天成交金额约1.8万亿元。截至目前，沪市成交额2145亿元，深市成交额2825亿元，北证50成交额29亿元。", "ctime": 1774576339, "time_str": "09:52:19", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675585018.shtml"}, {"id": "4152525", "title": "财政部廖岷会见哈佛大学教授艾利森", "content": "3月23日，财政部副部长廖岷在北京会见哈佛大学教授艾利森，就中美经贸关系和地区热点问题等进行深入交流。廖岷表示，在中美元首重要共识引领下，双方近期在巴黎举行新一轮经贸磋商，形成了一些新共识，将继续保持磋商。深化经贸合作有利于两国和世界，中方愿在平等、尊重、互利的基础上与美方磋商解决相关分歧。艾利森表示，当前，世界和平与安全遭遇严重挑战，稳定美中关系对世界意义重大。经贸磋商机制现已成为美中之间的关键渠道，双方应继续保持密切沟通，妥善处理相关敏感问题。（财政部）", "ctime": 1774576266, "time_str": "09:51:06", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584980.shtml"}, {"id": "4152517", "title": "港股医药股盘初拉升，华领医药-B涨超12%", "content": "港股医药股盘初拉升，华领医药-B涨超12%，石药集团涨超7%，信达生物、百济神州、复星医药纷纷上扬。", "ctime": 1774576078, "time_str": "09:47:58", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584909.shtml"}, {"id": "4152511", "title": "大商所苯乙烯、乙二醇主力合约大涨5%", "content": "大商所乙二醇主力合约大涨5%，报5267元/吨。苯乙烯主力合约大涨5%，报10530元/吨。", "ctime": 1774576046, "time_str": "09:47:26", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584897.shtml"}, {"id": "4152505", "title": "电池产业链低开高走，华宝新能、海科新源涨超10%", "content": "电池产业链低开高走，华宝新能、海科新源涨超10%，天力锂能、丰元股份、石大胜华、华盛锂电跟涨。消息面上，据统计3月国内电池样本企业排产环比增长21.93%。正极，负极分别环比增长23.3%，16.42%;隔膜，电解液分别环比涨8.7%，涨18.78%。业内调研，预计4月锂电池行业整体排产达204GWh，环比增长4%。", "ctime": 1774575963, "time_str": "09:46:03", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584871.shtml"}, {"id": "4152501", "title": "化工股盘初冲高，金煤科技2连板", "content": "化工股盘初冲高，金煤科技2连板，山东海化涨停，滨化股份、金瑞矿业、红星发展、鲁银投资、镇洋发展跟涨。相关ETF方面，化工ETF富国（516120）涨1.18%，成交额1518.47万元，化工ETF嘉实（159129）涨1.07%，成交额486.69万元。", "ctime": 1774575859, "time_str": "09:44:19", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584836.shtml"}, {"id": "4152491", "title": "风电设备板块盘初走低，通裕重工跌超8%", "content": "风电设备板块盘初走低，通裕重工跌超8%，海力风电、吉鑫科技跌超7%，大金重工、双一科技、中环海陆跟跌。", "ctime": 1774575723, "time_str": "09:42:03", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584780.shtml"}, {"id": "4152489", "title": "现货黄金站上4420美元/盎司", "content": "现货黄金站上4420美元/盎司，日内涨0.87%。", "ctime": 1774575719, "time_str": "09:41:59", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584776.shtml"}, {"id": "4152485", "title": "创新药概念股短线拉升，联环药业触及涨停", "content": "创新药概念股短线拉升，联环药业触及涨停，九芝堂、广誉远、热景生物、益诺思、万邦德跟涨。相关ETF方面，创新药ETF富国（159748）成交额60.84万元，创新药ETF易方达（516080）成交额292.65万元。", "ctime": 1774575635, "time_str": "09:40:35", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584749.shtml"}, {"id": "4152475", "title": "算力租赁板块短线拉升，广电网络、贵广网络双双涨停", "content": "算力租赁板块短线拉升，广电网络、贵广网络双双涨停，奥瑞德、群兴玩具、湖北广电、光环新网跟涨。", "ctime": 1774575504, "time_str": "09:38:24", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584698.shtml"}, {"id": "4152471", "title": "港股消费板块盘初上扬，周黑鸭涨近8%", "content": "港股消费板块盘初上扬，周黑鸭涨近8%，海底捞涨超3%。华住集团-S、华润啤酒、百威亚太跟涨。", "ctime": 1774575441, "time_str": "09:37:21", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584674.shtml"}, {"id": "4152465", "title": "应急管理部公布4起化工非法生产典型案例", "content": "记者今天从应急管理部获悉，当前化工非法生产多发，形势严峻复杂，打击遏制非法生产需常抓不懈。为进一步推动各地区、有关部门、企业单位和社会公众深刻认识化工非法生产的严重危害性和“打非”工作的严峻复杂性，举一反三提升社会安全意识，保持严查严打严治高压态势，切实保护人民群众生命安全，应急管理部近日公布4起化工非法生产典型案例。（央视新闻）", "ctime": 1774575335, "time_str": "09:35:35", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584642.shtml"}, {"id": "4152463", "title": "军工板块盘初拉升，建设工业涨停", "content": "军工板块盘初拉升，建设工业涨停，北方长龙、长城军工、捷强装备、光电股份、天秦装备跟涨。", "ctime": 1774575288, "time_str": "09:34:48", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584620.shtml"}, {"id": "4152461", "title": "国家统计局：1-2月份规模以上工业企业利润实现较快增长", "content": "国家统计局工业司首席统计师于卫宁解读2026年1-2月份工业企业利润数据时表示，1-2月份，各地区各部门加紧实施更加积极有为的宏观政策，着力发挥存量政策和增量政策的集成效应，规模以上工业企业利润增长加快，多数行业利润回升，装备制造业和高技术制造业利润快速增长，工业企业效益状况呈现持续恢复态势。高技术制造业利润快速增长，带动引领作用增强。1-2月份，规模以上高技术制造业利润同比增长58.7%，较上年全年加快45.4个百分点；拉动全部规模以上工业企业利润增长7.9个百分点，拉动作用较上年全年增强5.5个百分点。从行业看，智能化产品制造发展向好，智能无人飞行器制造、智能车载设备制造、其他智能消费设备制造行业利润分别增长59.3%、50.0%、31.3%；半导体产业快速发展带动链条行业利润增长较快。", "ctime": 1774575278, "time_str": "09:34:38", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584618.shtml"}, {"id": "4152457", "title": "绿色电力板块局部活跃，广西能源2连板", "content": "绿色电力板块局部活跃，广西能源2连板，晋控电力涨停，鲁银投资、国电南自、京运通、中南文化、通业科技跟涨。", "ctime": 1774575237, "time_str": "09:33:57", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584602.shtml"}, {"id": "4152447", "title": "农药板块盘初冲高，苏利股份涨停", "content": "农药板块盘初冲高，苏利股份涨停，金正大、潞化科技、泸天化、四川美丰、安道麦A跟涨。", "ctime": 1774575143, "time_str": "09:32:23", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584526.shtml"}, {"id": "4152443", "title": "国家统计局：2026年1—2月份全国规模以上工业企业利润增长15.2%", "content": "1—2月份，全国规模以上工业企业实现利润总额10245.6亿元，同比增长15.2%。1—2月份，规模以上工业企业中，国有控股企业实现利润总额3665.6亿元，同比增长5.3%；股份制企业实现利润总额8032.9亿元，增长22.1%；外商及港澳台投资企业实现利润总额2167.5亿元，下降3.8%；私营企业实现利润总额2844.5亿元，增长37.2%。1—2月份，采矿业实现利润总额1556.1亿元，同比增长9.9%；制造业实现利润总额7321.5亿元，增长18.9%；电力、热力、燃气及水生产和供应业实现利润总额1368.0亿元，增长3.7%。(国家统计局)", "ctime": 1774575126, "time_str": "09:32:06", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584522.shtml"}, {"id": "4152429", "title": "中证1000股指期货(IM)主力合约日内跌超1%", "content": "中证1000股指期货(IM)主力合约日内跌超1%，现报7301.0点。", "ctime": 1774575011, "time_str": "09:30:11", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584491.shtml"}, {"id": "4152425", "title": "股指期货早盘开盘 主力合约集体低开", "content": "股指期货早盘开盘，主力合约集体低开。沪深300股指期货(IF)主力合约跌0.87%，上证50股指期货(IH)主力合约跌0.49%，中证500股指期货(IC)主力合约跌0.90%，中证1000股指期货(IM)主力合约跌1.14%。", "ctime": 1774574962, "time_str": "09:29:22", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584471.shtml"}, {"id": "4152413", "title": "ETF开盘：科创200ETF领涨4.01%，通信ETF领跌3.4%", "content": "ETF开盘涨跌不一，科创200ETF（589200）领涨4.01%，银行ETF（516210）涨2.88%，沪深港科技50ETF（517950）涨2.19%，通信ETF（159994）领跌3.4%，科创芯片设计ETF（589170）跌2.96%，通信ETF（159695）跌2.95%。", "ctime": 1774574805, "time_str": "09:26:45", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584429.shtml"}, {"id": "4152405", "title": "A股开盘：三大指数集体低开", "content": "A股开盘，上证指数低开0.95%，深证成指低开1.34%，创业板指低开1.1%。CPO、贵金属、存储芯片、光纤概念股跌幅居前。", "ctime": 1774574725, "time_str": "09:25:25", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584408.shtml"}, {"id": "4152401", "title": "以军称大规模袭击位于德黑兰的伊朗政权设施", "content": "当地时间3月27日凌晨，以色列国防军称其对位于德黑兰的伊朗政权设施实施了大规模袭击。伊朗方面对此暂无回应。(央视新闻)", "ctime": 1774574659, "time_str": "09:24:19", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584384.shtml"}, {"id": "4152395", "title": "伊朗发动“真实承诺－4”行动第83波攻势", "content": "伊朗伊斯兰革命卫队27日发布声明说，伊朗26日晚发动了“真实承诺－4”行动第83波攻势，使用多种类型导弹、无人机对多个美以军事设施实施打击。 声明说，此次行动的打击目标包括以色列境内石油储存设施、以军驻点。伊朗还对美国在中东地区的若干军事设施实施打击，包括一处情报交换中心以及多个航空器维护设施和燃料储存设施。 美国和以色列方面尚未公布具体损失情况。以色列国防军27日凌晨在社交媒体发文说，监测到从伊朗向以色列发射的导弹，正进行拦截。(新华社)", "ctime": 1774574541, "time_str": "09:22:21", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584360.shtml"}, {"id": "4152393", "title": "央行开展1462亿元7天期逆回购操作", "content": "央行公告，2026年3月27日，中国人民银行以固定利率、数量招标方式开展了1462亿元7天期逆回购操作，操作利率为1.40%，投标量与中标量均为1462亿元。（央行）", "ctime": 1774574515, "time_str": "09:21:55", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584350.shtml"}, {"id": "4152385", "title": "港股开盘：恒生指数低开0.35%，恒生科技指数低开0.44%", "content": "港股开盘，恒生指数低开0.35%，恒生科技指数低开0.44%。比亚迪股份高开2.73%，宁德时代高开超1%。美团-W低开0.63%，2025年经调整净亏损186.48亿元。", "ctime": 1774574453, "time_str": "09:20:53", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584334.shtml"}, {"id": "4152375", "title": "上一交易日ETF两市融资融券余额1168.26亿元", "content": "截至3月26日，ETF两市融资融券余额1168.26亿元，分类型来看，股票型ETF两融余额640.88亿元，债券型ETF两融余额96.27亿元，商品型ETF两融余额145.90亿元，QDII型ETF两融余额285.21亿元。其中，两融余额最高的非货币型ETF分别是华安黄金ETF（518880）、易方达黄金ETF（159934）、国泰中证全指证券公司ETF（512880），两融余额分别为68.48亿元、41.81亿元、40.52亿元。", "ctime": 1774574288, "time_str": "09:18:08", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675584134.shtml"}, {"id": "4152369", "title": "美国财长贝森特否认英国《金融时报》有关美联储监管职位及英国央行模式的报道", "content": "美国财政部长斯科特 贝森特在社交平台 X 上发布声明，否认英国《金融时报》一篇报道的内容。该报道称，美方拟参照英国央行与财政大臣之间的法定架构，作为美国财政部与美联储关系的范本。贝森特表示：“历史悠久的英国央行确有诸多值得称道之处，但美国从未考虑过在大西洋彼岸照搬其运作框架。”（新浪财经）", "ctime": 1774574218, "time_str": "09:16:58", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675583841.shtml"}, {"id": "4152363", "title": "人民币兑美元中间价报6.9141，较上日调低85点", "content": "人民币兑美元中间价报6.9141，较上日调低85点。", "ctime": 1774574135, "time_str": "09:15:35", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675583824.shtml"}, {"id": "4152359", "title": "华泰期货：当下白银与黄金一同呈现价格回落的情况", "content": "地缘方面，美国总统特朗普称将针对伊朗能源设施的打击再推迟10天，至美国东部时间2026年4月6日晚8点。特朗普同时否认急于同伊朗达成协议，并表示美国对伊朗的军事行动正在继续，坚称是伊朗方面寻求重启谈判。特朗普警告伊朗，应尽快在和平协议问题上“认真起来”，否则将面临严重后果。经济数据方面，美国上周初请失业金人数增加5000人，至21万人，符合市场预期。前一周续请失业金人数减少3.2万人，至181.9万人，为近两年来的最低水平。此外，经合组织发布最新经济展望报告，预计2026年全球经济增速为2.9%，2027年将小幅回升至3%。报告预计，美国经济增速将从2026年的2%放缓至2027年的1.7%。美国今年通胀率将达4.2%，远高于美联储预期。当下白银与黄金一同呈现价格回落的情况，逻辑与黄金类似；本身价格预计同样维持震荡格局，Ag2606合约震荡区间或在16300元/千克-17300元/千克。(华泰期货)", "ctime": 1774574106, "time_str": "09:15:06", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675583818.shtml"}, {"id": "4152355", "title": "日本政府通过2026财年临时预算案", "content": "当地时间27日，日本政府召开内阁会议，正式通过2026财年临时预算案，并于随后不久将其提交至国会。该预算适用于4月1日至11日的11天期间，一般会计支出总额为8.56万亿日元。政府计划在3月30日推动该预算案在国会获得通过，以避免出现预算空白。据悉，此次编制临时预算案，是自2015年安倍晋三第二次执政以来，时隔11年再次实施。日本首相高市早苗此前一直力争在本财年（2025年4月至2026年3月）内完成2026年度正式预算的通过，但在野党方面要求确保充分审议时间，反对在年度内仓促表决，导致预算审议出现分歧。本次临时预算案主要包括社会保障支出以及地方交付税拨款等内容。作为过渡性安排，临时预算将在正式预算通过后自动失效。（央视新闻）", "ctime": 1774574007, "time_str": "09:13:27", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675583307.shtml"}, {"id": "4152341", "title": "太平养老齐美祝或将出任海港人寿总经理", "content": "太平养老副总经理齐美祝或将出任海港人寿总经理一职。从任职经历看，齐美祝曾任陆家嘴国泰人寿总精算师、企划部总经理；中国太平洋人寿保险公司产品开发部产品管理处处长、团体业务部市场开发处处长等职务。自2015年6月起，齐美祝任太平养老总精算师；2017年1月起兼任财务负责人；2021年12月起任副总经理，分管财务会计部、战略企划部、产品精算部、资产管理部。（新浪财经）", "ctime": 1774573890, "time_str": "09:11:30", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675583285.shtml"}, {"id": "4152329", "title": "中国台湾证交所加权股价指数下跌2%至32669.39点", "content": "中国台湾证交所加权股价指数下跌2%至32669.39点。", "ctime": 1774573739, "time_str": "09:08:59", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675582699.shtml"}, {"id": "4152307", "title": "大商所纯苯主力合约大涨5%", "content": "大商所纯苯主力合约大涨5%，报8739元/吨。", "ctime": 1774573361, "time_str": "09:02:41", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675582135.shtml"}, {"id": "4152301", "title": "中国台湾加权指数低开0.21%", "content": "中国台湾加权指数低开0.21%，报33267.25点。", "ctime": 1774573268, "time_str": "09:01:08", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675582115.shtml"}, {"id": "4152299", "title": "3月26日348股获融资买入超亿元 新易盛获买入28亿元居首", "content": "3月26日共有3487只个股获融资资金买入，有348股买入金额超亿元。其中，新易盛、中际旭创、华工科技融资买入金额排名前三，分别获买入28.00亿元、24.50亿元、17.19亿元。", "ctime": 1774573259, "time_str": "09:00:59", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675582111.shtml"}, {"id": "4152295", "title": "富时中国A50指数期货盘初跌0.19%", "content": "富时中国A50指数期货在上一交易日夜盘收跌0.08%的基础上低开，盘初跌0.19%。", "ctime": 1774573226, "time_str": "09:00:26", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675582105.shtml"}, {"id": "4152281", "title": "期市早盘开盘，国内期货主力合约多数下跌", "content": "期市早盘开盘，国内期货主力合约多数下跌。跌幅方面，沪银跌超5%，欧线集运、沪金跌超2%，不锈钢、烧碱、沪锡、焦炭、菜粕等跌超1%。涨幅方面，苯乙烯、纯苯、合成橡胶涨超3%，燃油涨超2%，甲醇、对二甲苯、乙二醇、原油、短纤等涨超1%。", "ctime": 1774573206, "time_str": "09:00:06", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675581646.shtml"}, {"id": "4152263", "title": "两艘前往古巴的人道主义援助船失联", "content": "墨西哥海军部26日发布通报说，两艘向古巴运送人道主义援助物资的船只在加勒比海域失联。(新华社)", "ctime": 1774573024, "time_str": "08:57:04", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675581601.shtml"}, {"id": "4152249", "title": "墨西哥称两艘驶往古巴的人道主义援助船只失踪", "content": "当地时间3月26日，墨西哥海军部发布公告宣布启动搜救行动，以寻找2艘在前往古巴哈瓦那途中失踪的人道主义援助船只，据悉，船上共有9名不同国籍的船员。根据公告，这2艘船于3月20日从墨西哥启航，运送人道主义援助物资，原定于3月24日至25日抵达目的地古巴。但船只随后失联，截至目前仍无抵达消息。墨海军部通报，已向第五海军区、第九海军区指挥部及海军搜救与海上监视站发出警报，同时向海事界发布通告，旨在扩大搜寻范围。同时，已部署水面和空中部队在推测航线上执行海空搜寻任务。（央视新闻）", "ctime": 1774572746, "time_str": "08:52:26", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675581533.shtml"}, {"id": "4152223", "title": "两市融资余额较上日减少8.64亿元", "content": "截至3月26日，上交所融资余额报13213.69亿元，较前一交易日减少3.89亿元；深交所融资余额报12692.35亿元，较前一交易日减少4.75亿元；两市合计25906.04亿元，较前一交易日减少8.64亿元。", "ctime": 1774572418, "time_str": "08:46:58", "stock_code": "", "stock_name": "", "stock_market": "", "is_a_share": false, "source": "", "url": "https://news.10jqka.com.cn/20260327/c675581414.shtml"}];
+const SECTORS  = [{"name": "金融", "hit_count": 47, "etfs": []}, {"name": "军工", "hit_count": 30, "etfs": []}, {"name": "人工智能", "hit_count": 16, "etfs": []}, {"name": "数据要素", "hit_count": 15, "etfs": []}, {"name": "半导体", "hit_count": 10, "etfs": []}, {"name": "消费", "hit_count": 8, "etfs": []}, {"name": "新能源", "hit_count": 7, "etfs": []}, {"name": "低空经济", "hit_count": 5, "etfs": []}];
+const META     = {"update_time": "2026-03-27 10:23:23", "sentiment_score": 53.40909090909091, "agents": []};
+
+// 工具函数
+function pctClass(v) { return v >= 0 ? 'up' : 'down'; }
+function pctStr(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+function impactBadge(score) {
+  if (score >= 80) return '<span class="badge badge-s">S</span>';
+  if (score >= 65) return '<span class="badge badge-a">A</span>';
+  if (score >= 50) return '<span class="badge badge-b">B</span>';
+  return '<span class="badge badge-c">C</span>';
+}
+function barColor(score) {
+  if (score >= 80) return '#ef4444';
+  if (score >= 65) return '#f59e0b';
+  if (score >= 50) return '#3b82f6';
+  return '#64748b';
+}
+
+// 市场状态
+function updateMarketStatus() {
+  const el = document.getElementById('market-status');
+  const now = new Date();
+  const bjHour = (now.getUTCHours() + 8) % 24;
+  const bjMin = now.getUTCMinutes();
+  const t = bjHour * 100 + bjMin;
+  const day = (now.getUTCDay() + (now.getUTCHours() + 8 >= 24 ? 1 : 0)) % 7;
+  if (day === 0 || day === 6) {
+    el.innerHTML = '<span class="badge" style="background:rgba(100,116,139,0.2);color:#94a3b8">休市</span>';
+  } else if (t >= 930 && t <= 1130 || t >= 1300 && t <= 1500) {
+    el.innerHTML = '<span class="badge" style="background:rgba(34,197,94,0.2);color:#22c55e"><span class="pulse">●</span>&nbsp;交易中</span>';
+  } else if (t >= 915 && t < 930) {
+    el.innerHTML = '<span class="badge" style="background:rgba(245,158,11,0.2);color:#f59e0b">集合竞价</span>';
+  } else {
+    el.innerHTML = '<span class="badge" style="background:rgba(100,116,139,0.2);color:#94a3b8">已收盘</span>';
+  }
+  document.getElementById('update-time').textContent = META.update_time || '';
+}
+
+// KPI 卡片
+function renderKPI() {
+  const container = document.getElementById('kpi-cards');
+  const sentimentScore = META.sentiment_score || 50;
+  const pickCount = PICKS.length;
+  const topScore = PICKS.length > 0 ? PICKS[0].total : 0;
+  const hotSector = SECTORS.length > 0 ? SECTORS[0].name : '-';
+
+  const kpis = [
+    { label: '市场情绪', value: sentimentScore.toFixed(0), unit: '分', color: sentimentScore >= 60 ? '#ef4444' : sentimentScore >= 40 ? '#f59e0b' : '#22c55e' },
+    { label: '精选个股', value: pickCount, unit: '只', color: '#3b82f6' },
+    { label: '最高评分', value: topScore.toFixed(1), unit: '分', color: topScore >= 80 ? '#ef4444' : '#f59e0b' },
+    { label: '热门板块', value: hotSector, unit: '', color: '#8b5cf6' },
+  ];
+
+  container.innerHTML = kpis.map(k => `
+    <div class="card glow" style="border-left: 3px solid ${k.color}">
+      <p class="text-xs text-gray-500 mb-1">${k.label}</p>
+      <p class="text-2xl font-bold mono" style="color:${k.color}">${k.value}<span class="text-sm text-gray-500 ml-1">${k.unit}</span></p>
+    </div>
+  `).join('');
+}
+
+// Hot7
+function renderHot7() {
+  const container = document.getElementById('hot7-list');
+  if (!HOT7 || HOT7.length === 0) {
+    container.innerHTML = '<p class="text-gray-600 text-sm">暂无数据</p>';
+    return;
+  }
+  container.innerHTML = HOT7.map((item, i) => `
+    <div class="flex items-center gap-3 py-2 ${i < HOT7.length - 1 ? 'border-b border-gray-800' : ''}">
+      <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold
+        ${i < 3 ? 'bg-red-500/20 text-red-400' : 'bg-gray-700 text-gray-400'}">${i+1}</span>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium truncate">${item.name || item.symbol}</p>
+        <p class="text-xs text-gray-500 mono">${item.symbol}</p>
+      </div>
+      <span class="text-xs text-gray-400">${item.mentions}次提及</span>
+    </div>
+  `).join('');
+}
+
+// 精选个股
+function renderPicks() {
+  const tbody = document.getElementById('picks-table');
+  if (!PICKS || PICKS.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-gray-600 py-8">暂无符合条件的个股</td></tr>';
+    return;
+  }
+  tbody.innerHTML = PICKS.map(p => {
+    const dims = [
+      { name: '情绪', val: p.sentiment, w: 25 },
+      { name: '板块', val: p.sector, w: 20 },
+      { name: '龙头', val: p.leader, w: 20 },
+      { name: '资金', val: p.fund, w: 15 },
+      { name: '量价', val: p.vp, w: 10 },
+      { name: '封单', val: p.seal, w: 10 },
+    ];
+    const miniBar = dims.map(d => {
+      const pct = (d.val / 100 * d.w).toFixed(1);
+      return `<div class="flex items-center gap-1" title="${d.name}: ${d.val.toFixed(0)}">
+        <span class="text-gray-600" style="font-size:9px;width:18px">${d.name.substring(0,2)}</span>
+        <div class="score-bar flex-1"><div class="score-bar-fill" style="width:${d.val}%;background:${barColor(d.val)}"></div></div>
+      </div>`;
+    }).join('');
+    return `<tr class="border-b border-gray-800/50 hover:bg-gray-800/30">
+      <td class="py-2.5 px-2 mono text-xs text-gray-400">${p.symbol}</td>
+      <td class="py-2.5 px-1 font-medium text-sm">${p.name}</td>
+      <td class="py-2.5 px-1 text-right mono text-sm">${p.price.toFixed(2)}</td>
+      <td class="py-2.5 px-1 text-right mono text-sm ${pctClass(p.pct)}">${pctStr(p.pct)}</td>
+      <td class="py-2.5 px-1 text-right">${impactBadge(p.total)} <span class="mono text-sm ml-1">${p.total.toFixed(1)}</span></td>
+      <td class="py-2.5 px-1"><div class="space-y-0.5">${miniBar}</div></td>
+      <td class="py-2.5 px-1 text-right text-xs text-gray-400">${p.sector_name || '-'}</td>
+      <td class="py-2.5 px-1 text-right mono text-xs ${p.consecutive_ups >= 3 ? 'text-red-400' : 'text-gray-400'}">${p.consecutive_ups || 0}天</td>
+    </tr>`;
+  }).join('');
+}
+
+// 板块热度图
+function renderSectorChart() {
+  if (!SECTORS || SECTORS.length === 0) return;
+  const chart = echarts.init(document.getElementById('sector-chart'), null, { renderer: 'svg' });
+  const names = SECTORS.map(s => s.name);
+  const counts = SECTORS.map(s => s.hit_count);
+  chart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 80, right: 20, top: 10, bottom: 30 },
+    xAxis: { type: 'value', axisLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#64748b', fontSize: 11 }, splitLine: { lineStyle: { color: '#1e293b' } } },
+    yAxis: { type: 'category', data: names.reverse(), axisLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#94a3b8', fontSize: 12 } },
+    series: [{
+      type: 'bar', data: counts.reverse(), barWidth: 18,
+      itemStyle: { borderRadius: [0, 4, 4, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: '#3b82f6' }, { offset: 1, color: '#8b5cf6' }
+        ])
+      },
+      label: { show: true, position: 'right', color: '#94a3b8', fontSize: 11 }
+    }],
+    tooltip: { trigger: 'axis', backgroundColor: '#1e293b', borderColor: '#334155', textStyle: { color: '#e2e8f0' } }
+  });
+  window.addEventListener('resize', () => chart.resize());
+}
+
+// 新闻流
+function renderNews() {
+  const container = document.getElementById('news-feed');
+  const items = (NEWS || []).slice(0, 30);
+  if (items.length === 0) {
+    container.innerHTML = '<p class="text-gray-600 text-sm">暂无新闻</p>';
+    return;
+  }
+  container.innerHTML = items.map(n => {
+    const stockTag = n.stock_name ? `<span class="text-xs text-blue-400 ml-2">${n.stock_name}</span>` : '';
+    return `<div class="py-2 border-b border-gray-800/50">
+      <div class="flex items-start gap-2">
+        <span class="mono text-xs text-gray-600 mt-0.5 shrink-0">${n.time_str || ''}</span>
+        <p class="text-sm text-gray-300 leading-relaxed">${n.title}${stockTag}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// 交易代理状态
+function renderAgentStatus() {
+  const container = document.getElementById('agent-status');
+  const stateColors = {
+    'IDLE': '#64748b', 'OBSERVE': '#f59e0b', 'READY': '#3b82f6',
+    'HOLD': '#ef4444', 'EXIT': '#22c55e'
+  };
+  const agents = META.agents || [];
+  if (agents.length === 0) {
+    container.innerHTML = '<p class="text-gray-600 text-sm">无活跃交易代理</p>';
+    return;
+  }
+  container.innerHTML = agents.map(a => `
+    <div class="flex items-center justify-between py-2 border-b border-gray-800/50">
+      <div class="flex items-center gap-3">
+        <span class="w-2 h-2 rounded-full" style="background:${stateColors[a.state] || '#64748b'}"></span>
+        <div>
+          <span class="text-sm font-medium">${a.name || a.symbol}</span>
+          <span class="mono text-xs text-gray-500 ml-2">${a.symbol}</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="badge" style="background:${stateColors[a.state]}22;color:${stateColors[a.state]}">${a.state}</span>
+        <span class="mono text-xs text-gray-400">评分 ${a.score}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// 倒计时
+let nextRefresh = 180;
+function updateCountdown() {
+  nextRefresh--;
+  if (nextRefresh <= 0) {
+    location.reload();
+    return;
+  }
+  document.getElementById('countdown').textContent = `刷新 ${nextRefresh}s`;
+}
+
+// 初始化
+updateMarketStatus();
+renderKPI();
+renderHot7();
+renderPicks();
+renderSectorChart();
+renderNews();
+renderAgentStatus();
+setInterval(updateCountdown, 1000);
+setInterval(updateMarketStatus, 30000);
+</script>
+</body>
+</html>
