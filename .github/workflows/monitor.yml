@@ -1,0 +1,51 @@
+name: A股监控 + 飞书推送
+
+on:
+  schedule:
+    # 交易日盘前 (UTC 1:25 = 北京 9:25)
+    - cron: '25 1 * * 1-5'
+    # 午盘 (UTC 3:30 = 北京 11:30)
+    - cron: '30 3 * * 1-5'
+    # 尾盘 (UTC 6:30 = 北京 14:30)
+    - cron: '30 6 * * 1-5'
+    # 收盘总结 (UTC 7:10 = 北京 15:10)
+    - cron: '10 7 * * 1-5'
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run A-share monitor
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python monitor.py --mode live --output dashboard.html
+
+      - name: Prepare Pages directory
+        run: |
+          mkdir -p _pages
+          cp dashboard.html _pages/index.html
+          cp dashboard.html _pages/dashboard.html
+
+      - name: Deploy dashboard to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_pages
+          publish_branch: gh-pages
